@@ -34,6 +34,15 @@ jobs:
       - name: Make Gradle Wrapper Executable
         run: chmod +x ./gradlew
 
+      - name: Create Debug Signing Key
+        # debug.keystore is no longer committed to the repo, but build.gradle.kts still expects it.
+        run: |
+          if [ ! -f debug.keystore ]; then
+            keytool -genkeypair -keystore debug.keystore -storepass android \
+              -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+              -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
       - name: Build Debug APK
         run: ./gradlew :app:assembleDebug --no-daemon
 
