@@ -41,13 +41,16 @@ jobs:
         id: prep
         run: |
           mkdir -p release-assets
-          VERSION_TAG="${{ github.ref_name }}"
-          if [ -z "$VERSION_TAG" ] || [ "$VERSION_TAG" = "main" ] || [ "$VERSION_TAG" = "master" ]; then
-            VERSION_TAG="${{ github.event.inputs.tag_name }}"
+          # Manual runs use the tag typed into "Run workflow"; tag pushes use the pushed tag.
+          VERSION_TAG="${{ github.event.inputs.tag_name }}"
+          if [ -z "$VERSION_TAG" ]; then
+            VERSION_TAG="${{ github.ref_name }}"
           fi
           if [ -z "$VERSION_TAG" ]; then
             VERSION_TAG="v1.0.0"
           fi
+          # Branch names like feature/x would otherwise break the file path below.
+          VERSION_TAG="${VERSION_TAG//\//-}"
           cp app/build/outputs/apk/debug/app-debug.apk "release-assets/MeshInstaller-${VERSION_TAG}.apk"
           echo "version_tag=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
 
@@ -55,6 +58,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.prep.outputs.version_tag }}
+          # Tag the commit that was actually built, not the default branch.
+          target_commitish: ${{ github.sha }}
           name: "Mesh Installer ${{ steps.prep.outputs.version_tag }}"
           draft: false
           prerelease: false
