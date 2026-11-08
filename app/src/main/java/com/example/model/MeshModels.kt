@@ -204,7 +204,9 @@ data class CustomFirmwareFile(
     val displayName: String,
     val sizeBytes: Long,
     val sha256Hex: String,
-    val format: String // BIN, UF2, ZIP
+    val format: String, // BIN, UF2, ZIP
+    /** Non-blocking compatibility note shown under the file (e.g. a .uf2 picked for an ESP32 board). */
+    val warning: String? = null
 )
 
 data class UsbAttachedBoard(

@@ -37,7 +37,6 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.DeveloperBoard
-import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Usb
@@ -124,6 +123,7 @@ fun FlasherWorkbenchScreen(
     onToggleLoopbackBench: (Boolean) -> Unit,
     onImportCustomFile: () -> Unit,
     onClearCustomFile: () -> Unit,
+    onDismissCustomFirmwareError: () -> Unit = {},
     onTrigger1200BpsTouch: () -> Unit,
     onTriggerEspReset: () -> Unit,
     onStartFlash: () -> Unit,
@@ -165,6 +165,7 @@ fun FlasherWorkbenchScreen(
             onToggleLoopbackBench = onToggleLoopbackBench,
             onImportCustomFile = onImportCustomFile,
             onClearCustomFile = onClearCustomFile,
+            onDismissCustomFirmwareError = onDismissCustomFirmwareError,
             onTrigger1200BpsTouch = onTrigger1200BpsTouch,
             onTriggerEspReset = onTriggerEspReset,
             onStartFlash = onStartFlash,
@@ -202,6 +203,7 @@ private fun FlasherIdleView(
     onToggleLoopbackBench: (Boolean) -> Unit,
     onImportCustomFile: () -> Unit,
     onClearCustomFile: () -> Unit,
+    onDismissCustomFirmwareError: () -> Unit = {},
     onTrigger1200BpsTouch: () -> Unit,
     onTriggerEspReset: () -> Unit,
     onStartFlash: () -> Unit,
@@ -870,7 +872,7 @@ private fun FlasherIdleView(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Header row: Label + Actions (Versions & Local File)
+                    // Header row: Label + Versions picker (custom firmware has its own full-width button below)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -881,7 +883,12 @@ private fun FlasherIdleView(
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            letterSpacing = 1.sp
+                            letterSpacing = 1.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp)
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Surface(
@@ -903,35 +910,6 @@ private fun FlasherIdleView(
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.SemiBold,
                                         color = BlueAccent
-                                    )
-                                }
-                            }
-                            Surface(
-                                modifier = Modifier
-                                    .defaultMinSize(minHeight = 48.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { onImportCustomFile() }
-                                    .testTag("import_custom_firmware_button"),
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surface,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.FolderOpen,
-                                        contentDescription = "Import Local File",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Text(
-                                        text = "Local File",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.primary
                                     )
                                 }
                             }
@@ -1207,112 +1185,73 @@ private fun FlasherIdleView(
                         }
                     }
 
-                    // Custom Local Firmware File Banner
-                    uiState.customFirmwareFile?.let { customFile ->
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            color = BlueAccent.copy(alpha = 0.1f),
-                            border = BorderStroke(1.dp, BlueAccent.copy(alpha = 0.5f))
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "LOCAL: ${customFile.displayName}",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = BlueAccent,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "${customFile.sizeBytes / 1024} KB • ${customFile.format} • SHA256: ${customFile.sha256Hex.take(12)}...",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Surface(
-                                    modifier = Modifier
-                                        .defaultMinSize(minHeight = 48.dp, minWidth = 48.dp)
-                                        .clip(CircleShape)
-                                        .clickable { onClearCustomFile() },
-                                    color = CoralRed.copy(alpha = 0.15f),
-                                    shape = CircleShape
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.Close,
-                                            contentDescription = "Clear Local Firmware",
-                                            tint = CoralRed,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    // Custom firmware: full-width picker, or the loaded file with Replace / Clear
+                    CustomFirmwareSection(
+                        customFile = uiState.customFirmwareFile,
+                        isImporting = uiState.isImportingCustomFirmware,
+                        importError = uiState.customFirmwareImportError,
+                        boardName = board.name,
+                        onPickFile = onImportCustomFile,
+                        onClearFile = onClearCustomFile,
+                        onDismissError = onDismissCustomFirmwareError
+                    )
 
-                    // Offline Vault Status & Quick Action
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val isSavedOffline = currentOfflineEntry != null
+                    // Offline Vault Status & Quick Action (hidden while a custom file overrides the release)
+                    if (uiState.customFirmwareFile == null) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = if (isSavedOffline) Icons.Default.CheckCircle else Icons.Default.CloudDownload,
-                                contentDescription = null,
-                                tint = if (isSavedOffline) GreenSuccess else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = if (isSavedOffline) {
-                                    "Cached in Vault (${currentOfflineEntry!!.sizeBytes / 1024} KB)"
-                                } else {
-                                    "Target: $expectedFileName"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (isSavedOffline) GreenSuccess else MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        Surface(
-                            modifier = Modifier
-                                .defaultMinSize(minHeight = 48.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { onSaveCurrentSelectionOffline() }
-                                .testTag("save_current_offline_button"),
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isSavedOffline) GreenSuccess.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(
-                                1.dp,
-                                if (isSavedOffline) GreenSuccess.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant
-                            )
-                        ) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            val isSavedOffline = currentOfflineEntry != null
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.weight(1f)
                             ) {
-                                Text(
-                                    text = if (isSavedOffline) "SAVED OFFLINE ✓" else "SAVE TO VAULT",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isSavedOffline) GreenSuccess else MaterialTheme.colorScheme.primary
+                                Icon(
+                                    imageVector = if (isSavedOffline) Icons.Default.CheckCircle else Icons.Default.CloudDownload,
+                                    contentDescription = null,
+                                    tint = if (isSavedOffline) GreenSuccess else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
                                 )
+                                Text(
+                                    text = if (isSavedOffline) {
+                                        "Cached in Vault (${currentOfflineEntry!!.sizeBytes / 1024} KB)"
+                                    } else {
+                                        "Target: $expectedFileName"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isSavedOffline) GreenSuccess else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Surface(
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onSaveCurrentSelectionOffline() }
+                                    .testTag("save_current_offline_button"),
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSavedOffline) GreenSuccess.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSavedOffline) GreenSuccess.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant
+                                )
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = if (isSavedOffline) "SAVED OFFLINE ✓" else "SAVE TO VAULT",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSavedOffline) GreenSuccess else MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                         }
                     }

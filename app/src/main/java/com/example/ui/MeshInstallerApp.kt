@@ -263,6 +263,7 @@ fun MeshInstallerApp(
                                 firmwareFileLauncher.launch(arrayOf("*/*"))
                             },
                             onClearCustomFile = viewModel::clearCustomFirmware,
+                            onDismissCustomFirmwareError = viewModel::dismissCustomFirmwareImportError,
                             onTrigger1200BpsTouch = viewModel::trigger1200BpsDfuTouch,
                             onTriggerEspReset = viewModel::triggerEspReset,
                             onStartFlash = viewModel::startFirmwareFlash,

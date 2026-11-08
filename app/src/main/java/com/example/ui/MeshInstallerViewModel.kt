@@ -13,6 +13,7 @@ import com.example.model.CachedFirmwareEntry
 import com.example.model.ConnectionTransport
 import com.example.model.ConsoleLogEntry
 import com.example.model.CustomFirmwareFile
+import com.example.model.CustomFirmwareValidation
 import com.example.model.FirmwareEcosystem
 import com.example.model.FirmwareRelease
 import com.example.model.FlashPhase
@@ -57,6 +58,8 @@ data class MeshInstallerUiState(
     val isFetchingReleases: Boolean = false,
     val customFirmwareFile: CustomFirmwareFile? = null,
     val customFirmwareBytes: ByteArray? = null,
+    val isImportingCustomFirmware: Boolean = false,
+    val customFirmwareImportError: String? = null,
     val fullFlashErase: Boolean = true,
     val bundleWebUiPartition: Boolean = true,
     val verifySha256AfterFlash: Boolean = true,
@@ -975,17 +978,42 @@ class MeshInstallerViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun importCustomFirmwareUri(uri: Uri) {
+        val phase = _uiState.value.flashProgress.phase
+        if (phase != FlashPhase.IDLE && phase != FlashPhase.COMPLETED && phase != FlashPhase.FAILED) {
+            _uiState.update { it.copy(customFirmwareImportError = "Wait for the current flash to finish before loading a new file.") }
+            return
+        }
+        _uiState.update { it.copy(isImportingCustomFirmware = true, customFirmwareImportError = null) }
         viewModelScope.launch(Dispatchers.IO) {
+            fun fail(message: String) {
+                _uiState.update { it.copy(isImportingCustomFirmware = false, customFirmwareImportError = message) }
+                appendLog(LogLevel.ERROR, "FILE-IMPORT", message)
+            }
             try {
                 val resolver = getApplication<Application>().contentResolver
                 var fileName = "custom_firmware.bin"
+                var reportedSize: Long? = null
                 resolver.query(uri, null, null, null, null)?.use { cursor ->
                     if (cursor.moveToFirst()) {
                         val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                         if (idx >= 0) fileName = cursor.getString(idx) ?: fileName
+                        val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                        if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) reportedSize = cursor.getLong(sizeIdx)
                     }
                 }
-                val rawBytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
+                CustomFirmwareValidation.rejectionReason(fileName, reportedSize)?.let {
+                    fail(it)
+                    return@launch
+                }
+                val rawBytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+                if (rawBytes == null) {
+                    fail("Couldn't open $fileName. Try copying it to your Downloads folder and picking it again.")
+                    return@launch
+                }
+                CustomFirmwareValidation.rejectionReason(fileName, rawBytes.size.toLong())?.let {
+                    fail(it)
+                    return@launch
+                }
                 val currentState = _uiState.value
                 val inspected = repository.inspectUserImportedBytes(
                     rawBytes = rawBytes,
@@ -1001,13 +1029,19 @@ class MeshInstallerViewModel(application: Application) : AndroidViewModel(applic
                     displayName = inspected.fileName,
                     sizeBytes = inspected.bytes.size.toLong(),
                     sha256Hex = inspected.sha256Hex,
-                    format = ext
+                    format = ext,
+                    warning = CustomFirmwareValidation.compatibilityWarning(
+                        inspected.fileName,
+                        currentState.selectedBoard.mcu
+                    )
                 )
                 withContext(Dispatchers.Main) {
                     _uiState.update { state ->
                         state.copy(
                             customFirmwareFile = customFile,
                             customFirmwareBytes = inspected.bytes,
+                            isImportingCustomFirmware = false,
+                            customFirmwareImportError = null,
                             selectedMeshtasticTrack = if (state.selectedEcosystem == FirmwareEcosystem.MESHTASTIC) MeshtasticTrack.CUSTOM else state.selectedMeshtasticTrack,
                             selectedMeshCoreRole = if (state.selectedEcosystem == FirmwareEcosystem.MESHCORE) MeshCoreRole.CUSTOM else state.selectedMeshCoreRole
                         )
@@ -1018,10 +1052,16 @@ class MeshInstallerViewModel(application: Application) : AndroidViewModel(applic
                         "Prepared ${inspected.fileName} (${inspected.bytes.size / 1024} KB @ 0x%05X) • SHA-256: ${inspected.sha256Hex.take(16)}…".format(inspected.flashOffset)
                     )
                 }
+            } catch (e: OutOfMemoryError) {
+                fail("That file is too large to load on this phone.")
             } catch (e: Exception) {
-                appendLog(LogLevel.ERROR, "FILE-IMPORT", "Failed to read firmware file: ${e.message}")
+                fail("Couldn't read the firmware file: ${e.message ?: e.javaClass.simpleName}")
             }
         }
+    }
+
+    fun dismissCustomFirmwareImportError() {
+        _uiState.update { it.copy(customFirmwareImportError = null) }
     }
 
     fun clearCustomFirmware() {
@@ -1029,6 +1069,7 @@ class MeshInstallerViewModel(application: Application) : AndroidViewModel(applic
             it.copy(
                 customFirmwareFile = null,
                 customFirmwareBytes = null,
+                customFirmwareImportError = null,
                 selectedMeshtasticTrack = if (it.selectedMeshtasticTrack == MeshtasticTrack.CUSTOM) MeshtasticTrack.STABLE else it.selectedMeshtasticTrack,
                 selectedMeshCoreRole = if (it.selectedMeshCoreRole == MeshCoreRole.CUSTOM) MeshCoreRole.COMPANION_BLE else it.selectedMeshCoreRole
             )
